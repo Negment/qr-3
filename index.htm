@@ -16,6 +16,9 @@ pre{font-size:12px;white-space:pre-wrap;background:#f4f4f4;padding:6px;margin:6p
 img{border:1px solid #ccc;image-rendering:pixelated;display:block;margin-top:8px}
 img[hidden]{display:none}
 .note{font-size:12px;color:gray}
+/* #stat/#info/#preview は入力・生成のたびに高さが変わる。既定のscroll anchoringに任せると、
+   スクロールした状態でこれらが更新されたときに表示位置が不自然に飛ぶことがあるため無効化する */
+#stat,#info,#preview,#dl{overflow-anchor:none}
 </style>
 </head>
 <body>
@@ -24,17 +27,17 @@ img[hidden]{display:none}
 <label>誤り訂正
 <select id="ec"><option value="0">L (7%)</option><option value="1">M (15%)</option><option value="2">Q (25%)</option><option value="3">H (30%)</option><option value="auto">自動(サイズを増やさず最強)</option></select></label>
 <label>モード
-<select id="mode"><option value="auto">自動：最適に分割</option><option value="0">数字のみ</option><option value="1">英数字のみ</option><option value="2">漢字のみ</option><option value="3">Byteのみ</option></select></label>
+<select id="mode"><option value="auto">自動：最適に分割</option><option value="0">数字のみ</option><option value="1">英数字のみ</option><option value="2">漢字のみ</option><option value="3">Byte(UTF-8)のみ</option></select></label>
 <label>マスク
-<select id="mask"><option value="pen">自動：ペナルティ最小</option><option value="size">自動：ファイル最小</option>
+<select id="mask"><option value="pen">自動：ペナルティ最小</option><option value="size">自動：ファイル最小(低速・規格外のマスク選び方)</option>
 <option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
 <option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option></select></label>
 <label>余白
-<select id="qz"><option value="0">なし</option><option value="2" selected>2モジュール</option><option value="4">4モジュール(規格)</option></select></label>
+<select id="qz"><option value="4">4モジュール(規格推奨)</option><option value="2" selected>2モジュール(縮小・条件次第)</option><option value="0">なし(実験用)</option></select></label>
 <label>形式
 <select id="fmt"><option value="auto">自動：最小のもの</option><option value="png">PNGのみ</option><option value="webp">WebPのみ</option></select></label>
 <label>拡大
-<select id="sc"><option value="1">1px/モジュール(最小)</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select></label>
+<select id="sc"><option value="1">1px/モジュール(最小・実験用)</option><option value="2">2</option><option value="4">4(実用的な下限目安)</option><option value="8">8</option></select></label>
 </div>
 <div>
 <label><input type="checkbox" id="kj" checked>自動時に漢字モード(Shift_JIS)も使う</label>
@@ -48,8 +51,12 @@ img[hidden]{display:none}
 <p class="note">
 誤り訂正(EC)：コードが汚れたり欠けたりしても復元できる量です。L=約7%、M=約15%、Q=約25%、H=約30%。高いほど頑丈ですが、データ用の領域が減ってQRが大きくなります。「自動」は、Lで決まるサイズ(バージョン)のまま、入る範囲で最も高いレベルにします。<br>
 モード：「自動」は文字ごとに数字/英数字/漢字/Byteを最小bitになるよう切り替えます。手動は全体を1つのモードに固定します(表せない文字があるとエラー)。<br>
-画像は可逆(劣化なし)のPNG/WebPのみ。PNGは自前で1bit化・フィルタ/圧縮方式を総当たりして最小のものを採用し、WebPは実際にデコードして完全一致を確認できた場合だけ候補にします。<br>
-漢字モードは、読み取りアプリがShift_JISとして解釈できる場合に有効です(非対応アプリでは文字化けの可能性)。
+画像は可逆(劣化なし)のPNG/WebPのみ。PNGは自前で1bit化し、フィルタ×圧縮方式(無圧縮/自前DEFLATE/ブラウザ標準CompressionStreamが使えればそれも)を総当たりして、このブラウザで生成できた中で最小のものを採用します(ブラウザによって使える圧縮方式が変わるため、結果はブラウザ依存です)。WebPは実際にデコードして元画像と完全一致を確認できた場合だけ候補にします。<br>
+マスク「自動：ファイル最小」は、QR規格が定める4種類のペナルティによる評価ではなく、実際の画像ファイルのバイト数が最小になるものを選びます。QRとしての読み取りやすさを保証する選び方ではありません。<br>
+漢字モードは、JIS X 0208の2バイト文字をQR規格独自の13bit値に変換して格納する専用モードです(Shift_JISの文字列をそのまま埋め込むわけではありません)。読み取り側がこのモードに対応していないと日本語が正しく復元できないことがあります。<br>
+Byteモードは文字コードをUTF-8として格納しますが、QR内に「UTF-8である」という指定(ECI)は付けていません。読み取り側がUTF-8と解釈してくれることが多いですが、保証はありません。<br>
+余白は4モジュールが規格上の推奨値です。2/0は非対応の読み取りアプリがあり得る実験的な設定です。拡大率1px/モジュールもファイルサイズ最小化のための設定で、実機のカメラでは読み取りにくい場合があります。<br>
+「ブラウザ内蔵QR検出での検証」は、このブラウザのBarcodeDetector APIで認識できたかだけを見ています。実際のQRリーダーアプリでの読み取りやすさを保証するものではありません。
 </p>
 
 <script>
@@ -73,7 +80,7 @@ const ALNUM='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ $%*+-./:';
 // モード: 0 数字 / 1 英数字 / 2 漢字 / 3 Byte
 const MI=[1,2,8,4];
 const CC=[[10,12,14],[9,11,13],[8,10,12],[8,16,16]];
-const MNAME=['数字','英数','漢字','Byte'];
+const MNAME=['数字','英数','漢字','Byte(UTF-8)'];
 const clsOf=v=>v<=9?0:v<=26?1:2;
 
 function rawModules(v){
@@ -128,10 +135,10 @@ const toUnits=(t,useK)=>Array.from(t).map(s=>unitOf(s,useK));
 
 /* ================= モード分割(厳密DP) ================= */
 // 状態: 数字(0〜2個目済) / 英数(0〜1個目済) / 漢字 / Byte。3桁・2文字ごとのビット数(4,3,3 / 6,5)を正確に数える。
-let ALLOW=[1,1,1,1]; // 手動モード指定時に使えるモード
+const ALLOW_ALL=[1,1,1,1]; // 既定: 全モード許可。手動モード制限は各関数の引数として渡す(グローバル状態にしない)
 const NS=7,SM=[0,0,0,1,1,2,3],SB=[0,3,5,6],SG=[3,2,1,1];
-function unitStep(m,p,u){
-  if(!ALLOW[m])return Infinity;
+function unitStep(m,p,u,allow){
+  if(!allow[m])return Infinity;
   switch(m){
     case 0:return u.num?[4,3,3][p]:Infinity;
     case 1:return u.aln?[6,5][p]:Infinity;
@@ -139,12 +146,12 @@ function unitStep(m,p,u){
     default:return 8*u.by.length;
   }
 }
-function segment(units,cls){
-  const n=units.length;if(!n)return [];
+function segment(units,cls,allow=ALLOW_ALL){
+  const n=units.length;if(!n)return{segs:[],bits:0};
   const hdr=[0,1,2,3].map(m=>4+CC[m][cls]);
   const dp=new Float64Array((n+1)*NS).fill(Infinity),from=new Int8Array((n+1)*NS).fill(-1);
   const relax=(i,m,p,base,fs,u)=>{
-    const c=unitStep(m,p,u);if(c===Infinity)return;
+    const c=unitStep(m,p,u,allow);if(c===Infinity)return;
     const t=SB[m]+(p+1)%SG[m],v=base+c;
     if(v<dp[i*NS+t]){dp[i*NS+t]=v;from[i*NS+t]=fs;}
   };
@@ -159,40 +166,31 @@ function segment(units,cls){
     }
   }
   let t=0;for(let k=1;k<NS;k++)if(dp[n*NS+k]<dp[n*NS+t])t=k;
+  const bits=dp[n*NS+t]; // このbit数は下のbuildCodewords()が実際に出力するbit列の長さと一致する(同じunitStep/CC/hdrテーブルから導出されるため)
   const modes=new Array(n);
   for(let i=n;i>=1;i--){modes[i-1]=SM[t];t=from[i*NS+t];}
   const segs=[];
   for(let i=0;i<n;){let j=i;while(j<n&&modes[j]===modes[i])j++;segs.push({m:modes[i],a:i,b:j});i=j;}
-  return segs;
+  return{segs,bits};
 }
-function segBits(segs,units,cls){
-  let t=0;
-  for(const s of segs){
-    t+=4+CC[s.m][cls];
-    const len=s.b-s.a;
-    if(s.m===0)t+=Math.floor(len/3)*10+[0,4,7][len%3];
-    else if(s.m===1)t+=Math.floor(len/2)*11+(len%2)*6;
-    else if(s.m===2)t+=len*13;
-    else{let by=0;for(let i=s.a;i<s.b;i++)by+=units[i].by.length;t+=by*8;}
-  }
-  return t;
-}
-function badUnit(units){return units.find(u=>![0,1,2,3].some(m=>unitStep(m,0,u)<Infinity));}
-function plan(units,e){
-  if(badUnit(units))return{ver:0,bad:true};
+function badUnit(units,allow=ALLOW_ALL){return units.find(u=>![0,1,2,3].some(m=>unitStep(m,0,u,allow)<Infinity));}
+// このunitがどのモードでなら表現できるか(制限なしで調べる。エラー表示用)
+function possibleModes(u){return [0,1,2,3].filter(m=>unitStep(m,0,u,ALLOW_ALL)<Infinity).map(m=>MNAME[m]);}
+function plan(units,e,allow=ALLOW_ALL){
+  if(badUnit(units,allow))return{ver:0,bad:true};
   const memo=[];
-  const get=c=>memo[c]||(memo[c]=(()=>{const s=segment(units,c);return{s,bits:segBits(s,units,c)};})());
+  const get=c=>memo[c]||(memo[c]=segment(units,c,allow));
   for(let v=1;v<=40;v++){
     const g=get(clsOf(v));
-    if(g.bits<=dataCW(v,e)*8)return{ver:v,segs:g.s,bits:g.bits};
+    if(g.bits<=dataCW(v,e)*8)return{ver:v,segs:g.segs,bits:g.bits};
   }
   return{ver:0};
 }
 // units の後ろに tpl をあと何個足せるか(DPの最終行から1文字ずつ延長。追加で最小bit数は減らないので、超えた所で打ち切り)
-function rowStep(prev,u,hdr){
+function rowStep(prev,u,hdr,allow){
   const nx=new Float64Array(NS).fill(Infinity);
   const rel=(m,p,base)=>{
-    const c=unitStep(m,p,u);if(c===Infinity)return;
+    const c=unitStep(m,p,u,allow);if(c===Infinity)return;
     const t=SB[m]+(p+1)%SG[m],v=base+c;if(v<nx[t])nx[t]=v;
   };
   if(!prev){for(let m=0;m<4;m++)rel(m,0,hdr[m]);return nx;}
@@ -205,14 +203,14 @@ function rowStep(prev,u,hdr){
   return nx;
 }
 const hdrOf=cls=>[0,1,2,3].map(m=>4+CC[m][cls]);
-function baseRow(units,cls){const h=hdrOf(cls);let row=null;for(const u of units)row=rowStep(row,u,h);return row;}
-function fitCount(row,tpl,cap,cls){
-  if(![0,1,2,3].some(m=>unitStep(m,0,tpl)<Infinity))return -2;
+function baseRow(units,cls,allow=ALLOW_ALL){const h=hdrOf(cls);let row=null;for(const u of units)row=rowStep(row,u,h,allow);return row;}
+function fitCount(row,tpl,cap,cls,allow=ALLOW_ALL){
+  if(![0,1,2,3].some(m=>unitStep(m,0,tpl,allow)<Infinity))return -2;
   const h=hdrOf(cls);
   if(row&&Math.min(...row)>cap)return -1;
   let c=0;
   while(c<7200){
-    const nx=rowStep(row,tpl,h);let mn=Infinity;
+    const nx=rowStep(row,tpl,h,allow);let mn=Infinity;
     for(const v of nx)if(v<mn)mn=v;
     if(mn>cap)break;
     row=nx;c++;
@@ -264,15 +262,17 @@ function rsRem(data,div){
   return r;
 }
 function addEcc(data,ver,e){
+  // ブロック分割: 短いブロック(データ長 sl-el) が ns 個、長いブロック(データ長 sl-el+1) が nb-ns 個。
   const nb=NBLK[e][ver-1],el=ECC_PB[e][ver-1],raw=Math.floor(rawModules(ver)/8);
   const ns=nb-raw%nb,sl=Math.floor(raw/nb),div=rsDiv(el),blocks=[];
   for(let i=0,k=0;i<nb;i++){
-    const dat=data.slice(k,k+sl-el+(i<ns?0:1));k+=dat.length;
-    const ecc=rsRem(dat,div);if(i<ns)dat.push(0);
-    blocks.push(dat.concat(ecc));
+    const dLen=sl-el+(i<ns?0:1),dat=data.slice(k,k+dLen);k+=dLen;
+    blocks.push({data:dat,ecc:rsRem(dat,div)});
   }
-  const res=[];
-  for(let i=0;i<blocks[0].length;i++)blocks.forEach((b,j)=>{if(i!==sl-el||j>=ns)res.push(b[i]);});
+  // データ部を横方向にインターリーブ(短いブロックは自分の長さ分だけ出す)、続けてECC部を横方向にインターリーブ
+  const res=[],maxD=sl-el+1;
+  for(let i=0;i<maxD;i++)for(const b of blocks)if(i<b.data.length)res.push(b.data[i]);
+  for(let i=0;i<el;i++)for(const b of blocks)res.push(b.ecc[i]);
   return res;
 }
 
@@ -339,7 +339,7 @@ function makeMatrix(ver,e,cw){
     return m;
   }};
 }
-const P1=[1,0,1,1,1,0,1,0,0,0,0],P2=[0,0,0,0,1,0,1,1,1,0,1];
+const FPAT=[1,0,1,1,1,0,1]; // 1:1:3:1:1 (この並びは回文なので前後どちら向きでも同じ)
 function penalty(m,n){
   let p=0;
   for(let dir=0;dir<2;dir++)for(let a=0;a<n;a++){
@@ -349,10 +349,16 @@ function penalty(m,n){
       const v=at(b);
       if(v===prev){run++;if(run===5)p+=3;else if(run>5)p++;}else{run=1;prev=v;}
     }
-    for(let b=0;b+11<=n;b++){
-      let f1=true,f2=true;
-      for(let k=0;k<11&&(f1||f2);k++){const v=at(b+k);if(v!==P1[k])f1=false;if(v!==P2[k])f2=false;}
-      if(f1||f2)p+=40;
+    // 1:1:3:1:1パターン(7モジュール)の直前または直後に白(0)が4つ以上連続、を規格通りに判定
+    for(let b=0;b+7<=n;b++){
+      let f=true;
+      for(let k=0;k<7;k++)if(at(b+k)!==FPAT[k]){f=false;break;}
+      if(!f)continue;
+      const white=(from,to)=>{ // [from,to)が全部白か。範囲外(符号外)はクワイエットゾーン相当として白扱い
+        for(let k=from;k<to;k++)if(k>=0&&k<n&&at(k)!==0)return false;
+        return true;
+      };
+      if(white(b-4,b)||white(b+7,b+11))p+=40;
     }
   }
   let dark=0;
@@ -360,7 +366,7 @@ function penalty(m,n){
     const v=m[y*n+x];dark+=v;
     if(x<n-1&&y<n-1&&v===m[y*n+x+1]&&v===m[(y+1)*n+x]&&v===m[(y+1)*n+x+1])p+=3;
   }
-  p+=(Math.ceil(Math.abs(dark*20-n*n*10)/(n*n))-1)*10;
+  p+=Math.floor(Math.abs(dark*20-n*n*10)/(n*n))*10; // 規格: 50%からの5%刻みで10点ずつ(50%ちょうどは0点)
   return p;
 }
 
@@ -400,8 +406,9 @@ async function decodeBlob(blob){
   });
 }
 async function verify(blob,img){
+  let bm;
   try{
-    const bm=await decodeBlob(blob);
+    bm=await decodeBlob(blob);
     if((bm.naturalWidth||bm.width)!==img.W||(bm.naturalHeight||bm.height)!==img.H)return false;
     const c=document.createElement('canvas');c.width=img.W;c.height=img.H;
     const ctx=c.getContext('2d',{willReadFrequently:true});
@@ -413,6 +420,7 @@ async function verify(blob,img){
     }
     return true;
   }catch(e){return false;}
+  finally{bm&&bm.close&&bm.close();}
 }
 
 /* ================= PNG(自前) ================= */
@@ -550,6 +558,8 @@ async function encodeImage(img,fmt){
     if(b)list.push({name:'WebP',ext:'webp',blob:b});
   }
   if(!list.length){
+    // fmt==='webp'を厳密に指定していて可逆WebPが作れなかった場合。ここでPNGへ黙って逃がすと「WebPのみ」の意味が崩れるのでエラーにする。
+    if(fmt==='webp')throw new Error('このブラウザでは可逆(劣化なし)なWebPを生成できませんでした。形式を「自動」かPNGにしてください。');
     let blob=new Blob([await encodePNG(img)],{type:'image/png'});
     if(!(await verify(blob,img)))blob=await new Promise(r=>toCanvas(img).toBlob(r,'image/png'));
     list.push({name:'PNG',ext:'png',blob});
@@ -558,30 +568,34 @@ async function encodeImage(img,fmt){
   return list;
 }
 async function scanTest(blob){
-  if(typeof BarcodeDetector==='undefined')return '非対応ブラウザ';
+  if(typeof BarcodeDetector==='undefined')return 'このブラウザは非対応';
+  let bm;
   try{
-    const bm=await decodeBlob(blob),k=Math.max(1,Math.ceil(300/(bm.naturalWidth||bm.width)));
+    bm=await decodeBlob(blob);
+    const k=Math.max(1,Math.ceil(300/(bm.naturalWidth||bm.width))); // 検出器に渡す入力を拡大(画像自体の情報量は増えない)
     const c=document.createElement('canvas');c.width=(bm.naturalWidth||bm.width)*k;c.height=(bm.naturalHeight||bm.height)*k;
     const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
     ctx.drawImage(bm,0,0,c.width,c.height);
     const r=await new BarcodeDetector({formats:['qr_code']}).detect(c);
-    return r.length?'OK':'読めず(余白なし等が原因の可能性)';
-  }catch(e){return '不明';}
+    return r.length?'成功':'失敗';
+  }catch(e){return '検証エラー';}
+  finally{bm&&bm.close&&bm.close();}
 }
 
 /* ================= 生成 ================= */
 function readOpts(){
   const ecv=$('ec').value,mode=$('mode').value;
-  ALLOW=mode==='auto'?[1,1,1,1]:[0,1,2,3].map(i=>+(i===+mode));
-  return{auto:ecv==='auto',e:ecv==='auto'?0:+ecv,useK:$('kj').checked||mode==='2'};
+  const allow=mode==='auto'?ALLOW_ALL:[0,1,2,3].map(i=>+(i===+mode));
+  return{auto:ecv==='auto',e:ecv==='auto'?0:+ecv,useK:$('kj').checked||mode==='2',allow};
 }
-let lastUrl=null;
+let lastUrl=null,genId=0;
 async function generate(){
+  const myId=++genId;
   const text=$('text').value;
   if(!text){$('info').textContent='テキストを入力してください。';return;}
   const o=readOpts(),es=o.e,useK=o.useK;
-  const units=toUnits(text,useK),p=plan(units,es);
-  if(p.bad){$('info').textContent='選択したモードでは表せない文字があります： '+badUnit(units).s;return;}
+  const units=toUnits(text,useK),p=plan(units,es,o.allow);
+  if(p.bad){const u=badUnit(units,o.allow);$('info').textContent='選択したモードでは表せない文字があります：「'+u.s+'」(表現できるモード: '+(possibleModes(u).join('/')||'なし(サロゲート異常などの可能性)')+')';return;}
   if(!p.ver){$('info').textContent='容量オーバー：バージョン40でも入りません。';return;}
   let e=es;
   if(o.auto)for(let k=3;k>es;k--)if(p.bits<=dataCW(p.ver,k)*8){e=k;break;}
@@ -593,14 +607,36 @@ async function generate(){
   let mask,res,sizes=null;
   if(mk==='size'){
     sizes=[];
-    for(let m=0;m<8;m++){
-      const r=await run(m);sizes.push(r.list[0].blob.size);
-      if(!res||r.list[0].blob.size<res.list[0].blob.size){res=r;mask=m;}
+    const imgs=[];let bestM=0,bestSize=Infinity,bestList=null;
+    if(ff==='png'){
+      // 出力形式がPNG限定なら、PNGサイズだけの比較で(結果は変わらないまま)軽量化できる
+      for(let m=0;m<8;m++){
+        const img=makeImage(mods[m],qm.n,q,s,$('sp').checked);imgs[m]=img;
+        const pngBytes=await encodePNG(img);
+        sizes.push(pngBytes.length);
+        if(pngBytes.length<bestSize){bestSize=pngBytes.length;bestM=m;}
+      }
+      bestList=await encodeImage(imgs[bestM],ff);
+    }else{
+      // auto/webpではPNGとWebPのどちらが最終的に小さいかがマスクごとに変わり得るので、
+      // 「実際に採用される形式」まで含めて8マスク全部を比較する(でないと真の最小にならない)
+      for(let m=0;m<8;m++){
+        const img=makeImage(mods[m],qm.n,q,s,$('sp').checked);imgs[m]=img;
+        try{
+          const list=await encodeImage(img,ff);
+          sizes.push(list[0].blob.size);
+          if(list[0].blob.size<bestSize){bestSize=list[0].blob.size;bestM=m;bestList=list;}
+        }catch(e){sizes.push(-1);} // このマスクでは(webp限定指定時に)可逆エンコードできなかった。他のマスクの結果で判断を続ける
+      }
+      if(!bestList)throw new Error('このブラウザでは可逆(劣化なし)なWebPを生成できませんでした。形式を「自動」かPNGにしてください。');
     }
+    mask=bestM;
+    res={img:imgs[mask],list:bestList};
   }else{
     mask=mk==='pen'?pens.indexOf(Math.min(...pens)):+mk;
     res=await run(mask);
   }
+  if(myId!==genId)return; // この間に新しい生成が始まっていたら、古い結果は捨てる
   const top=res.list[0],img=res.img;
   if(lastUrl)URL.revokeObjectURL(lastUrl);
   lastUrl=URL.createObjectURL(top.blob);
@@ -618,6 +654,7 @@ async function generate(){
     return MNAME[g.m]+'×'+c;
   }).join(' ');
   const scan=await scanTest(top.blob);
+  if(myId!==genId)return;
   $('info').textContent=
     'v'+p.ver+' ('+qm.n+'×'+qm.n+')  EC:'+'LMQH'[e]+(o.auto?'(自動)':'')+'  マスク:'+mask+'\n'+
     'セグメント: '+segStr+'\n'+
@@ -625,40 +662,56 @@ async function generate(){
     '画像: '+img.W+'×'+img.H+'px  採用 '+top.name+' '+top.blob.size+'B  ('+
       res.list.map(x=>x.name+' '+x.blob.size+'B').join(' / ')+')\n'+
     'ペナルティ: '+pens.map((v,i)=>i+':'+v).join(' ')+'\n'+
-    (sizes?'マスク別ファイルサイズ: '+sizes.map((v,i)=>i+':'+v+'B').join(' ')+'\n':'')+
-    '読取テスト: '+scan;
+    (sizes?'マスク別ファイルサイズ('+(ff==='png'?'PNG':'採用形式')+'): '+sizes.map((v,i)=>i+':'+(v<0?'不可':v+'B')).join(' ')+'\n':'')+
+    'ブラウザ内蔵QR検出(BarcodeDetector)での検証: '+scan;
 }
+const LOCK=['gen','text','ec','mode','mask','qz','fmt','sc','kj','sp'];
 $('gen').onclick=async()=>{
-  const b=$('gen');b.disabled=true;
+  LOCK.forEach(id=>$(id).disabled=true);
   try{await generate();}catch(err){$('info').textContent='エラー: '+err.message;}
-  b.disabled=false;
+  LOCK.forEach(id=>$(id).disabled=false);
 };
 
 /* ================= 文字数表示(入力時のみ更新) ================= */
-const maxCache={};
+const maxCache=new Map();
 const esc=t=>t.replace(/[&<>"']/g,c=>'&#'+c.charCodeAt(0)+';');
+// 軽量版: 文字数/バイト数だけを即座に出す(DPなし)。長文入力でも毎打鍵ノーコスト。
+function quickStat(){
+  const text=$('text').value;
+  const bytes=enc.encode(text).length,chars=Array.from(text).length;
+  $('stat').innerHTML='<div style="font-size:13px">'+chars+'文字 / UTF-8 '+bytes+'B / 計算中…</div>';
+}
+// 重い版: モードDP・容量計算込み。入力が止まってから走らせる。
 function updateStat(){
-  const text=$('text').value,o=readOpts(),e=o.e,useK=o.useK;
+  const text=$('text').value,o=readOpts(),e=o.e,useK=o.useK,allow=o.allow;
   const units=toUnits(text,useK);
   const T=[['数字','0'],['英数(大文字等)','A'],['ASCII(小文字等)','a'],[unitOf('あ',useK).kj>=0?'漢字/かな':'日本語(UTF-8)','あ']]
     .map(t=>[t[0],unitOf(t[1],useK)]);
-  const cap40=dataCW(40,e)*8,key=e+'_'+useK+'_'+ALLOW.join('');
-  if(!maxCache[key])maxCache[key]=T.map(t=>fitCount(null,t[1],cap40,2));
-  const p=plan(units,e);
-  const cur=p.ver?(r=>T.map(t=>fitCount(r,t[1],dataCW(p.ver,e)*8,clsOf(p.ver))))(baseRow(units,clsOf(p.ver))):T.map(()=>-1);
-  const b40=p.bad?null:baseRow(units,2),all=p.bad?[]:T.map(t=>fitCount(b40,t[1],cap40,2));
+  const cap40=dataCW(40,e)*8,key=e+'_'+useK+'_'+allow.join('');
+  if(!maxCache.has(key))maxCache.set(key,T.map(t=>fitCount(null,t[1],cap40,2,allow)));
+  const maxRow=maxCache.get(key);
+  const p=plan(units,e,allow);
+  const cur=p.ver?(r=>T.map(t=>fitCount(r,t[1],dataCW(p.ver,e)*8,clsOf(p.ver),allow)))(baseRow(units,clsOf(p.ver),allow)):T.map(()=>-1);
+  const b40=p.bad?null:baseRow(units,2,allow),all=p.bad?[]:T.map(t=>fitCount(b40,t[1],cap40,2,allow));
   const row=(l,arr)=>'<tr><td>'+l+'</td>'+arr.map(v=>'<td>'+(v===-2?'—':v<0?'超過':v)+'</td>').join('')+'</tr>';
   const lv='LMQH'[e]+(o.auto?'基準':'');
   let bytes=0;units.forEach(u=>bytes+=u.by.length);
   $('stat').innerHTML=
     '<div style="font-size:13px">'+units.length+'文字 / UTF-8 '+bytes+'B / '+
-    (p.bad?'選択したモードでは表せない文字あり：'+esc(badUnit(units).s):p.ver?'現在 v'+p.ver+'-'+lv+' ('+p.bits+' / '+dataCW(p.ver,e)*8+' bit)':'容量オーバー')+'</div>'+
+    (p.bad?(u=>'選択したモードでは表せない文字あり：「'+esc(u.s)+'」(表現できるモード: '+(possibleModes(u).join('/')||'なし')+')')(badUnit(units,allow)):p.ver?'現在 v'+p.ver+'-'+lv+' ('+p.bits+' / '+dataCW(p.ver,e)*8+' bit)':'容量オーバー')+'</div>'+
     '<table><tr><th></th>'+T.map(t=>'<th>'+t[0]+'</th>').join('')+'</tr>'+
-    row('最大(v40-'+lv+')',maxCache[key])+
+    row('最大(v40-'+lv+')',maxRow)+
     (p.bad?'':row('このバージョン内であと',cur)+row('v40までであと',all))+'</table>';
 }
-let raf=0;
-const schedule=()=>{cancelAnimationFrame(raf);raf=requestAnimationFrame(updateStat);};
+let raf=0,statTimer=0,composing=false;
+const schedule=()=>{
+  if(composing)return;
+  quickStat(); // 即座に文字数だけ更新
+  clearTimeout(statTimer);
+  statTimer=setTimeout(()=>{cancelAnimationFrame(raf);raf=requestAnimationFrame(updateStat);},120); // 入力が止まってから重い計算
+};
+$('text').addEventListener('compositionstart',()=>{composing=true;});
+$('text').addEventListener('compositionend',()=>{composing=false;schedule();});
 /* 設定の保存(静的ページ用。localStorageが使えない環境では何もしない) */
 const SAVE=['ec','mode','mask','qz','fmt','sc','kj','sp'];
 try{
@@ -678,7 +731,7 @@ function saveSettings(){
 }
 SAVE.forEach(id=>$(id).addEventListener('change',()=>{saveSettings();schedule();}));
 $('text').addEventListener('input',schedule);
-updateStat();
+setTimeout(updateStat,0); // 初回描画をブロックしないよう1tick遅らせる(漢字モード有効時のShift_JISテーブル構築を含むため)
 </script>
 </body>
 </html>
