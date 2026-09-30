@@ -41,7 +41,8 @@ img[hidden]{display:none}
 </div>
 <div>
 <label><input type="checkbox" id="kj" checked>自動時に漢字モード(Shift_JIS)も使う</label>
-<label><input type="checkbox" id="sp" checked>左右の余りbitを余白に使う(サイズ増なし)</label>
+<label><input type="checkbox" id="sp" checked>左右の余りbitを余白に使う(サイズ増なし。余白0でもON推奨/OFFで厳密に余白なし)</label>
+<label><input type="checkbox" id="eci">Byteモードの前にUTF-8指定(ECI)を付ける(+12bit。読み取り互換性を上げたい場合に)</label>
 </div>
 <button id="gen">生成・ダウンロード</button>
 <div id="stat"></div>
@@ -54,8 +55,9 @@ img[hidden]{display:none}
 画像は可逆(劣化なし)のPNG/WebPのみ。PNGは自前で1bit化し、フィルタ×圧縮方式(無圧縮/自前DEFLATE/ブラウザ標準CompressionStreamが使えればそれも)を総当たりして、このブラウザで生成できた中で最小のものを採用します(ブラウザによって使える圧縮方式が変わるため、結果はブラウザ依存です)。WebPは実際にデコードして元画像と完全一致を確認できた場合だけ候補にします。<br>
 マスク「自動：ファイル最小」は、QR規格が定める4種類のペナルティによる評価ではなく、実際の画像ファイルのバイト数が最小になるものを選びます。QRとしての読み取りやすさを保証する選び方ではありません。<br>
 漢字モードは、JIS X 0208の2バイト文字をQR規格独自の13bit値に変換して格納する専用モードです(Shift_JISの文字列をそのまま埋め込むわけではありません)。読み取り側がこのモードに対応していないと日本語が正しく復元できないことがあります。<br>
-Byteモードは文字コードをUTF-8として格納しますが、QR内に「UTF-8である」という指定(ECI)は付けていません。読み取り側がUTF-8と解釈してくれることが多いですが、保証はありません。<br>
+Byteモードは文字コードをUTF-8として格納しますが、既定ではQR内に「UTF-8である」という指定(ECI)は付けていません。読み取り側がUTF-8と解釈してくれることが多いですが、保証はありません。実際、広く使われているZBarというライブラリは、ECIが無いとUTF-8より先にShift_JISとして解釈を試みる仕様になっており、日本語を含むByteモードのデータが文字化けすることが確認できています。読み取り互換性を優先したい場合は「Byteモードの前にUTF-8指定(ECI)を付ける」をONにしてください(12bit分サイズが増えます)。<br>
 余白は4モジュールが規格上の推奨値です。2/0は非対応の読み取りアプリがあり得る実験的な設定です。拡大率1px/モジュールもファイルサイズ最小化のための設定で、実機のカメラでは読み取りにくい場合があります。<br>
+「左右の余りbitを余白に使う」はPNGの1行がbyte単位になる際に生じる端数を余白側に回す機能です。余白0を選んでいても、このチェックがONだと数px分の白が付くことがあります(ファイルサイズは変わりません)。正確に0pxの余白にしたい場合はこのチェックを外してください。<br>
 「ブラウザ内蔵QR検出での検証」は、このブラウザのBarcodeDetector APIで認識できたかだけを見ています。実際のQRリーダーアプリでの読み取りやすさを保証するものではありません。
 </p>
 
@@ -176,13 +178,16 @@ function segment(units,cls,allow=ALLOW_ALL){
 function badUnit(units,allow=ALLOW_ALL){return units.find(u=>![0,1,2,3].some(m=>unitStep(m,0,u,allow)<Infinity));}
 // このunitがどのモードでなら表現できるか(制限なしで調べる。エラー表示用)
 function possibleModes(u){return [0,1,2,3].filter(m=>unitStep(m,0,u,ALLOW_ALL)<Infinity).map(m=>MNAME[m]);}
-function plan(units,e,allow=ALLOW_ALL){
+const ECI_UTF8_BITS=12; // ECI mode indicator(4bit) + UTF-8のECI指定番号26(1byte形式,8bit)
+function eciOverhead(segs,useEci){return useEci&&segs.some(s=>s.m===3)?ECI_UTF8_BITS:0;}
+function plan(units,e,allow=ALLOW_ALL,useEci=false){
   if(badUnit(units,allow))return{ver:0,bad:true};
   const memo=[];
   const get=c=>memo[c]||(memo[c]=segment(units,c,allow));
   for(let v=1;v<=40;v++){
     const g=get(clsOf(v));
-    if(g.bits<=dataCW(v,e)*8)return{ver:v,segs:g.segs,bits:g.bits};
+    const bits=g.bits+eciOverhead(g.segs,useEci);
+    if(bits<=dataCW(v,e)*8)return{ver:v,segs:g.segs,bits};
   }
   return{ver:0};
 }
@@ -219,9 +224,10 @@ function fitCount(row,tpl,cap,cls,allow=ALLOW_ALL){
 }
 
 /* ================= データ列・誤り訂正 ================= */
-function buildCodewords(units,segs,ver,e){
+function buildCodewords(units,segs,ver,e,useEci=false){
   const cls=clsOf(ver),bits=[];
   const put=(v,n)=>{for(let i=n-1;i>=0;i--)bits.push((v>>>i)&1);};
+  if(useEci&&segs.some(s=>s.m===3)){put(7,4);put(26,8);} // ECI mode indicator + UTF-8(26)
   for(const s of segs){
     const len=s.b-s.a,us=units.slice(s.a,s.b);
     put(MI[s.m],4);
@@ -373,7 +379,7 @@ function penalty(m,n){
 /* ================= 画像化(1bit) ================= */
 function makeImage(mod,size,q,s,spare){
   const Wm=(size+2*q)*s,H=Wm,rb=Math.ceil(Wm/8);
-  const W=spare?rb*8:Wm,off=q*s+(spare?Math.floor((W-Wm)/2):0); // 端数bitは元々ファイルに含まれる分なので余白に回す(サイズ増なし)
+  const W=spare?rb*8:Wm,off=q*s+(spare?Math.floor((W-Wm)/2):0); // 端数bitは元々ファイルに含まれる分なので余白に回す(サイズ増なし)。qz=0でもspareをONにしている場合はユーザーの明示的な選択として尊重し、byte境界の端数分だけ白を足す
   const rows=new Uint8Array(rb*H).fill(0xFF); // 1=白
   for(let y=0;y<H;y++){
     const my=Math.floor(y/s)-q;
@@ -567,17 +573,20 @@ async function encodeImage(img,fmt){
   list.sort((a,b)=>a.blob.size-b.blob.size);
   return list;
 }
-async function scanTest(blob){
+async function scanTest(blob,origText){
   if(typeof BarcodeDetector==='undefined')return 'このブラウザは非対応';
   let bm;
   try{
     bm=await decodeBlob(blob);
-    const k=Math.max(1,Math.ceil(300/(bm.naturalWidth||bm.width))); // 検出器に渡す入力を拡大(画像自体の情報量は増えない)
-    const c=document.createElement('canvas');c.width=(bm.naturalWidth||bm.width)*k;c.height=(bm.naturalHeight||bm.height)*k;
+    const w0=bm.naturalWidth||bm.width,h0=bm.naturalHeight||bm.height;
+    const k=Math.max(1,Math.ceil(300/w0)),pad=16*k; // 検出器に渡す入力を拡大し、余白0設定でも縁と誤認しないよう周囲に白を足す(画像自体には影響しない)
+    const c=document.createElement('canvas');c.width=w0*k+pad*2;c.height=h0*k+pad*2;
     const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
-    ctx.drawImage(bm,0,0,c.width,c.height);
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+    ctx.drawImage(bm,pad,pad,w0*k,h0*k);
     const r=await new BarcodeDetector({formats:['qr_code']}).detect(c);
-    return r.length?'成功':'失敗';
+    if(!r.length)return '失敗(検出できず)';
+    return r[0].rawValue===origText?'成功(内容も一致)':'検出はしたが内容不一致(rawValue: '+JSON.stringify(r[0].rawValue).slice(0,60)+')';
   }catch(e){return '検証エラー';}
   finally{bm&&bm.close&&bm.close();}
 }
@@ -586,7 +595,7 @@ async function scanTest(blob){
 function readOpts(){
   const ecv=$('ec').value,mode=$('mode').value;
   const allow=mode==='auto'?ALLOW_ALL:[0,1,2,3].map(i=>+(i===+mode));
-  return{auto:ecv==='auto',e:ecv==='auto'?0:+ecv,useK:$('kj').checked||mode==='2',allow};
+  return{auto:ecv==='auto',e:ecv==='auto'?0:+ecv,useK:$('kj').checked||mode==='2',allow,useEci:$('eci').checked};
 }
 let lastUrl=null,genId=0;
 async function generate(){
@@ -594,12 +603,12 @@ async function generate(){
   const text=$('text').value;
   if(!text){$('info').textContent='テキストを入力してください。';return;}
   const o=readOpts(),es=o.e,useK=o.useK;
-  const units=toUnits(text,useK),p=plan(units,es,o.allow);
+  const units=toUnits(text,useK),p=plan(units,es,o.allow,o.useEci);
   if(p.bad){const u=badUnit(units,o.allow);$('info').textContent='選択したモードでは表せない文字があります：「'+u.s+'」(表現できるモード: '+(possibleModes(u).join('/')||'なし(サロゲート異常などの可能性)')+')';return;}
   if(!p.ver){$('info').textContent='容量オーバー：バージョン40でも入りません。';return;}
   let e=es;
   if(o.auto)for(let k=3;k>es;k--)if(p.bits<=dataCW(p.ver,k)*8){e=k;break;}
-  const qm=makeMatrix(p.ver,e,buildCodewords(units,p.segs,p.ver,e));
+  const qm=makeMatrix(p.ver,e,buildCodewords(units,p.segs,p.ver,e,o.useEci));
   const q=+$('qz').value,s=+$('sc').value,ff=$('fmt').value,mk=$('mask').value;
   const mods=[],pens=[];
   for(let m=0;m<8;m++){mods[m]=qm.render(m);pens[m]=penalty(mods[m],qm.n);}
@@ -653,7 +662,7 @@ async function generate(){
     if(g.m===3){c=0;for(let i=g.a;i<g.b;i++)c+=units[i].by.length;c+='B';}
     return MNAME[g.m]+'×'+c;
   }).join(' ');
-  const scan=await scanTest(top.blob);
+  const scan=await scanTest(top.blob,text);
   if(myId!==genId)return;
   $('info').textContent=
     'v'+p.ver+' ('+qm.n+'×'+qm.n+')  EC:'+'LMQH'[e]+(o.auto?'(自動)':'')+'  マスク:'+mask+'\n'+
@@ -665,7 +674,7 @@ async function generate(){
     (sizes?'マスク別ファイルサイズ('+(ff==='png'?'PNG':'採用形式')+'): '+sizes.map((v,i)=>i+':'+(v<0?'不可':v+'B')).join(' ')+'\n':'')+
     'ブラウザ内蔵QR検出(BarcodeDetector)での検証: '+scan;
 }
-const LOCK=['gen','text','ec','mode','mask','qz','fmt','sc','kj','sp'];
+const LOCK=['gen','text','ec','mode','mask','qz','fmt','sc','kj','sp','eci'];
 $('gen').onclick=async()=>{
   LOCK.forEach(id=>$(id).disabled=true);
   try{await generate();}catch(err){$('info').textContent='エラー: '+err.message;}
@@ -683,15 +692,16 @@ function quickStat(){
 }
 // 重い版: モードDP・容量計算込み。入力が止まってから走らせる。
 function updateStat(){
-  const text=$('text').value,o=readOpts(),e=o.e,useK=o.useK,allow=o.allow;
+  const text=$('text').value,o=readOpts(),e=o.e,useK=o.useK,allow=o.allow,useEci=o.useEci;
   const units=toUnits(text,useK);
   const T=[['数字','0'],['英数(大文字等)','A'],['ASCII(小文字等)','a'],[unitOf('あ',useK).kj>=0?'漢字/かな':'日本語(UTF-8)','あ']]
     .map(t=>[t[0],unitOf(t[1],useK)]);
-  const cap40=dataCW(40,e)*8,key=e+'_'+useK+'_'+allow.join('');
+  const eciAdj=useEci?ECI_UTF8_BITS:0; // ECI有効時は一律で差し引く(数字/英数字は実際には影響しないぶん少し控えめな見積もりになる)
+  const cap40=dataCW(40,e)*8-eciAdj,key=e+'_'+useK+'_'+allow.join('')+'_'+useEci;
   if(!maxCache.has(key))maxCache.set(key,T.map(t=>fitCount(null,t[1],cap40,2,allow)));
   const maxRow=maxCache.get(key);
-  const p=plan(units,e,allow);
-  const cur=p.ver?(r=>T.map(t=>fitCount(r,t[1],dataCW(p.ver,e)*8,clsOf(p.ver),allow)))(baseRow(units,clsOf(p.ver),allow)):T.map(()=>-1);
+  const p=plan(units,e,allow,useEci);
+  const cur=p.ver?(r=>T.map(t=>fitCount(r,t[1],dataCW(p.ver,e)*8-eciAdj,clsOf(p.ver),allow)))(baseRow(units,clsOf(p.ver),allow)):T.map(()=>-1);
   const b40=p.bad?null:baseRow(units,2,allow),all=p.bad?[]:T.map(t=>fitCount(b40,t[1],cap40,2,allow));
   const row=(l,arr)=>'<tr><td>'+l+'</td>'+arr.map(v=>'<td>'+(v===-2?'—':v<0?'超過':v)+'</td>').join('')+'</tr>';
   const lv='LMQH'[e]+(o.auto?'基準':'');
@@ -713,7 +723,7 @@ const schedule=()=>{
 $('text').addEventListener('compositionstart',()=>{composing=true;});
 $('text').addEventListener('compositionend',()=>{composing=false;schedule();});
 /* 設定の保存(静的ページ用。localStorageが使えない環境では何もしない) */
-const SAVE=['ec','mode','mask','qz','fmt','sc','kj','sp'];
+const SAVE=['ec','mode','mask','qz','fmt','sc','kj','sp','eci'];
 try{
   const o=JSON.parse(localStorage.getItem('qrgen')||'{}');
   SAVE.forEach(id=>{
